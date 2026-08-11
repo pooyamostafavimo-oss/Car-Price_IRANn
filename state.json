@@ -1,10 +1,5 @@
 {
-  "last_message_ids": [
-    430,
-    432,
-    433,
-    434
-  ],
-  "last_run_utc": "2026-08-08T17:44:37.219988+00:00",
-  "vehicle_count": 115
+  "last_message_ids": [],
+  "last_run_utc": null,
+  "vehicle_count": 0
 }
