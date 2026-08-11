@@ -5,6 +5,9 @@ on:
     - cron: '30 8 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   update-prices:
     runs-on: ubuntu-latest
@@ -26,3 +29,15 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python scripts/post_prices.py
+
+      - name: Commit updated state.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet -- state.json; then
+            git add state.json
+            git commit -m "chore: update state.json [skip ci]"
+            git push
+          else
+            echo "state.json تغییری نکرده، commit لازم نیست."
+          fi
