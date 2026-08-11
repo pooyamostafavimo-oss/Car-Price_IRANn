@@ -184,30 +184,66 @@ def unpin_previous(token, chat_id, message_ids):
     for mid in message_ids:
         tg_api(token, "unpinChatMessage", {"chat_id": chat_id, "message_id": mid})
 
-def send_and_pin(token, chat_id, messages):
-    sent_ids = []
+def delete_messages(token, chat_id, message_ids):
+    for mid in message_ids:
+        tg_api(token, "deleteMessage", {"chat_id": chat_id, "message_id": mid})
+
+def edit_or_send_and_pin(token, chat_id, messages, old_ids):
+    """
+    به جای ارسال پیام تازه، پیام‌های قبلی (اگر وجود داشته باشند) را ادیت
+    می‌کند. فقط وقتی تعداد پیام‌های جدید از قبلی بیشتر شود، پیام اضافه
+    ارسال می‌شود.
+    """
+    new_ids = []
+
     for i, text in enumerate(messages):
-        result = tg_api(token, "sendMessage", {
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        })
-        if not result.get("ok"):
-            raise RuntimeError(f"ارسال پیام {i + 1} با شکست مواجه شد: {result}")
-        msg_id = result["result"]["message_id"]
-        sent_ids.append(msg_id)
+        old_id = old_ids[i] if i < len(old_ids) else None
+        msg_id = None
 
-        if i == 0:
-            pin_result = tg_api(token, "pinChatMessage", {
+        if old_id:
+            result = tg_api(token, "editMessageText", {
                 "chat_id": chat_id,
-                "message_id": msg_id,
-                "disable_notification": False,
+                "message_id": old_id,
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
             })
-            if not pin_result.get("ok"):
-                print("⚠️ پیام ارسال شد ولی پین کردن ناموفق بود.", file=sys.stderr)
+            if result.get("ok"):
+                msg_id = result["result"]["message_id"]
+            else:
+                description = str(result.get("description", ""))
+                if "message is not modified" in description.lower():
+                    # متن یکسان است، پیام همان قبلی باقی می‌ماند.
+                    msg_id = old_id
+                else:
+                    print(
+                        f"⚠️ ادیت پیام {i + 1} ناموفق بود، به‌جای آن پیام جدید ارسال می‌شود: {description}",
+                        file=sys.stderr,
+                    )
 
-    return sent_ids
+        if msg_id is None:
+            result = tg_api(token, "sendMessage", {
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            })
+            if not result.get("ok"):
+                raise RuntimeError(f"ارسال پیام {i + 1} با شکست مواجه شد: {result}")
+            msg_id = result["result"]["message_id"]
+
+            if i == 0:
+                pin_result = tg_api(token, "pinChatMessage", {
+                    "chat_id": chat_id,
+                    "message_id": msg_id,
+                    "disable_notification": False,
+                })
+                if not pin_result.get("ok"):
+                    print("⚠️ پیام ارسال شد ولی پین کردن ناموفق بود.", file=sys.stderr)
+
+        new_ids.append(msg_id)
+
+    return new_ids
 
 def main():
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -235,17 +271,20 @@ def main():
     state = load_state()
     old_ids = state.get("last_message_ids", [])
 
-    new_ids = send_and_pin(token, chat_id, messages)
+    new_ids = edit_or_send_and_pin(token, chat_id, messages, old_ids)
 
-    if old_ids:
-        unpin_previous(token, chat_id, old_ids)
+    # اگر تعداد پیام‌های قبلی بیشتر از پیام‌های تازه بود، پیام‌های اضافی
+    # حذف می‌شوند تا پیام‌های قدیمی و بی‌ربط در چت باقی نمانند.
+    if len(old_ids) > len(new_ids):
+        extra_ids = old_ids[len(new_ids):]
+        delete_messages(token, chat_id, extra_ids)
 
     state["last_message_ids"] = new_ids
     state["last_run_utc"] = datetime.now(timezone.utc).isoformat()
     state["vehicle_count"] = total_rows
     save_state(state)
 
-    print("✅ تمام خودروها و تاریخ ارسال شدند.")
+    print("✅ تمام خودروها و تاریخ ادیت/ارسال شدند.")
 
 if __name__ == "__main__":
     main()
