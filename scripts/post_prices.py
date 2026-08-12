@@ -180,68 +180,22 @@ def tg_api(token, method, payload):
         print(f"⚠️ خطا در {method}: {data}", file=sys.stderr)
     return data
 
-def unpin_previous(token, chat_id, message_ids):
-    for mid in message_ids:
-        tg_api(token, "unpinChatMessage", {"chat_id": chat_id, "message_id": mid})
-
-def delete_messages(token, chat_id, message_ids):
-    for mid in message_ids:
-        tg_api(token, "deleteMessage", {"chat_id": chat_id, "message_id": mid})
-
-def edit_or_send_and_pin(token, chat_id, messages, old_ids):
+def send_new_messages(token, chat_id, messages):
     """
-    به جای ارسال پیام تازه، پیام‌های قبلی (اگر وجود داشته باشند) را ادیت
-    می‌کند. فقط وقتی تعداد پیام‌های جدید از قبلی بیشتر شود، پیام اضافه
-    ارسال می‌شود.
+    هر بار پیام‌های تازه ارسال می‌کند (بدون ادیت پیام قبلی و بدون پین کردن).
     """
     new_ids = []
 
     for i, text in enumerate(messages):
-        old_id = old_ids[i] if i < len(old_ids) else None
-        msg_id = None
-
-        if old_id:
-            result = tg_api(token, "editMessageText", {
-                "chat_id": chat_id,
-                "message_id": old_id,
-                "text": text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-            })
-            if result.get("ok"):
-                msg_id = result["result"]["message_id"]
-            else:
-                description = str(result.get("description", ""))
-                if "message is not modified" in description.lower():
-                    # متن یکسان است، پیام همان قبلی باقی می‌ماند.
-                    msg_id = old_id
-                else:
-                    print(
-                        f"⚠️ ادیت پیام {i + 1} ناموفق بود، به‌جای آن پیام جدید ارسال می‌شود: {description}",
-                        file=sys.stderr,
-                    )
-
-        if msg_id is None:
-            result = tg_api(token, "sendMessage", {
-                "chat_id": chat_id,
-                "text": text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-            })
-            if not result.get("ok"):
-                raise RuntimeError(f"ارسال پیام {i + 1} با شکست مواجه شد: {result}")
-            msg_id = result["result"]["message_id"]
-
-            if i == 0:
-                pin_result = tg_api(token, "pinChatMessage", {
-                    "chat_id": chat_id,
-                    "message_id": msg_id,
-                    "disable_notification": False,
-                })
-                if not pin_result.get("ok"):
-                    print("⚠️ پیام ارسال شد ولی پین کردن ناموفق بود.", file=sys.stderr)
-
-        new_ids.append(msg_id)
+        result = tg_api(token, "sendMessage", {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        })
+        if not result.get("ok"):
+            raise RuntimeError(f"ارسال پیام {i + 1} با شکست مواجه شد: {result}")
+        new_ids.append(result["result"]["message_id"])
 
     return new_ids
 
@@ -268,23 +222,15 @@ def main():
     messages = build_messages(groups, page_date, page_time)
     print(f"📨 {len(messages)} پیام ارسال خواهد شد.")
 
+    new_ids = send_new_messages(token, chat_id, messages)
+
     state = load_state()
-    old_ids = state.get("last_message_ids", [])
-
-    new_ids = edit_or_send_and_pin(token, chat_id, messages, old_ids)
-
-    # اگر تعداد پیام‌های قبلی بیشتر از پیام‌های تازه بود، پیام‌های اضافی
-    # حذف می‌شوند تا پیام‌های قدیمی و بی‌ربط در چت باقی نمانند.
-    if len(old_ids) > len(new_ids):
-        extra_ids = old_ids[len(new_ids):]
-        delete_messages(token, chat_id, extra_ids)
-
     state["last_message_ids"] = new_ids
     state["last_run_utc"] = datetime.now(timezone.utc).isoformat()
     state["vehicle_count"] = total_rows
     save_state(state)
 
-    print("✅ تمام خودروها و تاریخ ادیت/ارسال شدند.")
+    print("✅ پیام جدید قیمت‌ها ارسال شد.")
 
 if __name__ == "__main__":
     main()
